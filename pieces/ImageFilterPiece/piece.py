@@ -1,11 +1,9 @@
 from domino.base_piece import BasePiece
-from .models import InputModel, OutputModel
-from pathlib import Path
+from .models import InputModel, OutputModel, FilterResult
 from PIL import Image
 from io import BytesIO
 import numpy as np
 import base64
-import os
 
 
 filter_masks = {
@@ -26,63 +24,85 @@ class ImageFilterPiece(BasePiece):
 
     def piece_function(self, input_data: InputModel):
 
-        apply_sepia = input_data.sepia
-        apply_black_and_white = input_data.black_and_white
-        apply_brightness = input_data.brightness
-        apply_darkness = input_data.darkness
-        apply_contrast = input_data.contrast
-        apply_red = input_data.red
-        apply_green = input_data.green
-        apply_blue = input_data.blue
-        apply_cool = input_data.cool
-        apply_warm = input_data.warm
-
         all_filters = list()
-        if apply_sepia:
+        if input_data.sepia:
             all_filters.append('sepia')
-        if apply_black_and_white:
+        if input_data.black_and_white:
             all_filters.append('black_and_white')
-        if apply_brightness:
+        if input_data.brightness:
             all_filters.append('brightness')
-        if apply_darkness:
+        if input_data.darkness:
             all_filters.append('darkness')
-        if apply_contrast:
+        if input_data.contrast:
             all_filters.append('contrast')
-        if apply_red:
+        if input_data.red:
             all_filters.append('red')
-        if apply_green:
+        if input_data.green:
             all_filters.append('green')
-        if apply_blue:
+        if input_data.blue:
             all_filters.append('blue')
-        if apply_cool:
+        if input_data.cool:
             all_filters.append('cool')
-        if apply_warm:
+        if input_data.warm:
             all_filters.append('warm')
 
-        # Try to open image from file path or base64 encoded string
-        input_image = input_data.input_image
+        self.logger.info(f"Applying filters: {', '.join(all_filters) if all_filters else '(none)'}")
 
-        max_path_size = int(os.pathconf('/', 'PC_PATH_MAX'))
-        if len(input_image) < max_path_size and Path(input_image).exists() and Path(input_image).is_file():
-            image = Image.open(input_image)
-        else:
-            self.logger.info("Input image is not a file path, trying to decode as base64 string")
+        results = []
+        for entry in input_data.results:
+            # Gate on upstream status: only try to filter images the fetch Piece got successfully.
+            if entry.status != "success" or not entry.base64_content:
+                results.append(FilterResult(
+                    url=entry.url,
+                    status="failed",
+                    error=entry.error or "No image content from upstream.",
+                ))
+                continue
+
             try:
-                decoded_data = base64.b64decode(input_image)
-                image_stream = BytesIO(decoded_data)
-                image = Image.open(image_stream)
-                image.verify()
-                image = Image.open(image_stream)
-            except Exception:
-                raise ValueError("Input image is not a file path or a base64 encoded string")
+                filtered_image = self._filter_image(entry.base64_content, all_filters)
+                results.append(FilterResult(
+                    url=entry.url,
+                    status="success",
+                    filtered_image=filtered_image,
+                ))
+            except Exception as e:
+                self.logger.info(f"Filtering failed for {entry.url}: {e}")
+                results.append(FilterResult(
+                    url=entry.url,
+                    status="failed",
+                    error=str(e),
+                ))
 
+        n_failed = sum(1 for r in results if r.status == "failed")
+        self.logger.info(f"Filtered {len(results)} image(s): {len(results) - n_failed} succeeded, {n_failed} failed.")
+
+        # Preview the first successfully filtered image in the Domino GUI.
+        first_success = next((r for r in results if r.status == "success"), None)
+        if first_success is not None:
+            self.logger.info(f"Previewing filtered image for {first_success.url}")
+            self.display_result = {
+                "file_type": "png",
+                "base64_content": first_success.filtered_image,
+            }
+
+        return OutputModel(results=results)
+
+    def _filter_image(self, base64_content: str, filter_names: list) -> str:
+        # Decode the base64 string into a PIL image
+        try:
+            decoded_data = base64.b64decode(base64_content)
+            image = Image.open(BytesIO(decoded_data))
+            image.verify()
+            image = Image.open(BytesIO(decoded_data))
+        except Exception:
+            raise ValueError("Input content is not a valid base64 encoded image.")
 
         # Convert Image to NumPy array
         np_image = np.array(image, dtype=float)
 
         # Apply filters
-        self.logger.info(f"Applying filters: {', '.join(all_filters)}")
-        for filter_name in all_filters:
+        for filter_name in filter_names:
             np_mask = np.array(filter_masks[filter_name], dtype=float)
             for y in range(np_image.shape[0]):
                 for x in range(np_image.shape[1]):
@@ -96,28 +116,7 @@ class ImageFilterPiece(BasePiece):
         np_image = np_image.astype(np.uint8)
         modified_image = Image.fromarray(np_image)
 
-        # Save to file
-        image_file_path = ""
-        if input_data.output_type == "file" or input_data.output_type == "both":
-            image_file_path = f"{self.results_path}/modified_image.png"
-            modified_image.save(image_file_path)
-
-        # Convert to base64 string
-        image_base64_string = ""
-        if input_data.output_type == "base64_string" or input_data.output_type == "both":
-            buffered = BytesIO()
-            modified_image.save(buffered, format="PNG")
-            image_base64_string = base64.b64encode(buffered.getvalue()).decode('utf-8')
-
-
-        self.display_result = {
-            "file_type": "png",
-            "base64_content": image_base64_string,
-            "file_path": image_file_path
-        }
-
-        # Return output
-        return OutputModel(
-            image_base64_string=image_base64_string,
-            image_file_path=image_file_path,
-        )
+        # Encode as base64 PNG string
+        buffered = BytesIO()
+        modified_image.save(buffered, format="PNG")
+        return base64.b64encode(buffered.getvalue()).decode('utf-8')

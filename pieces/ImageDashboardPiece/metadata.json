@@ -1,0 +1,16 @@
+{
+    "name": "ImageDashboardPiece",
+    "description": "Renders an HTML dashboard previewing every filtered image from ImageFilterPiece.",
+    "dependency": {
+        "requirements_file": "requirements_0.txt"
+    },
+    "tags": [
+        "default",
+        "image",
+        "dashboard"
+    ],
+    "style": {
+        "node_label": "Image Dashboard",
+        "icon_class_name": "ic:twotone-dashboard"
+    }
+}

@@ -1,19 +1,45 @@
 from pydantic import BaseModel, Field
-from enum import Enum
+from typing import List, Optional
 
 
-class OutputTypeType(str, Enum):
-    """
-    Output type for the result text
-    """
-    file = "file"
-    base64_string = "base64_string"
-    both = "both"
+class FetchResult(BaseModel):
+    """One entry from HttpRequestPiece's output. Defined here so this Piece stays self-contained."""
+    url: str = Field(
+        description="The URL this entry corresponds to."
+    )
+    status: str = Field(
+        description='Upstream fetch outcome: "success" or "failed".'
+    )
+    base64_content: Optional[str] = Field(
+        default=None,
+        description="Fetched content as a base64 encoded string. Set when status is 'success'."
+    )
+    error: Optional[str] = Field(
+        default=None,
+        description="Upstream error message. Set when status is 'failed'."
+    )
+
+
+class FilterResult(BaseModel):
+    url: str = Field(
+        description="The URL this entry corresponds to."
+    )
+    status: str = Field(
+        description='Filtering outcome: "success" or "failed".'
+    )
+    filtered_image: Optional[str] = Field(
+        default=None,
+        description="Filtered image as a base64 encoded PNG string. Set when status is 'success'."
+    )
+    error: Optional[str] = Field(
+        default=None,
+        description="Error message. Set when status is 'failed'."
+    )
 
 
 class InputModel(BaseModel):
-    input_image: str = Field(
-        description='Input image. It should be either a path to a file, or a base64 encoded string.',
+    results: List[FetchResult] = Field(
+        description="The full results list from HttpRequestPiece. One filtered entry is produced per URL.",
         json_schema_extra={
             "from_upstream": "always"
         }
@@ -58,18 +84,10 @@ class InputModel(BaseModel):
         default=False,
         description='Apply warm effect.',
     )
-    output_type: OutputTypeType = Field(
-        default=OutputTypeType.both,
-        description='Format of the output image. Options are: `file`, `base64_string`, `both`.',
-    )
 
 
 class OutputModel(BaseModel):
-    image_base64_string: str = Field(
-        default='',
-        description='Base64 encoded string of the output image.',
-    )
-    image_file_path: str = Field(
-        default='',
-        description='Path to the output image file.',
+    results: List[FilterResult] = Field(
+        default=[],
+        description='One entry per input URL, in the same order, whether filtering succeeded or failed.'
     )
