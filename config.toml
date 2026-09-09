@@ -4,5 +4,5 @@ REGISTRY_NAME = "racheljxw"
 REPOSITORY_NAME = "default_domino_pieces"
 REPOSITORY_LABEL = "Default Pieces Repository"
 
-VERSION = "0.8.2"
+VERSION = "0.8.3"
 
